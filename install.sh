@@ -1,13 +1,13 @@
 #!/bin/sh
 # grok-bot install script — Unified CLI & MCP Setup
 # Works on macOS, Linux, and Windows (Git Bash / WSL)
-# Usage: curl -fsSL https://raw.githubusercontent.com/Kargatharaakash/grok-bot-mcp/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/ly85206559/grok-bot-mcp/main/install.sh | sh
 
 set -e
 
 NAME="grok-bot"
 DIR="$HOME/.gbm/bin"
-REPO="Kargatharaakash/grok-bot-mcp"
+REPO="ly85206559/grok-bot-mcp"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 mkdir -p "$DIR"

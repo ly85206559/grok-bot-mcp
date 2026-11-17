@@ -515,9 +515,56 @@ async function callGateway(command, body = {}, gateway = null) {
   const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
   if (!r.ok) {
     const t = await r.text().catch(() => "");
-    throw new Error(`${command}: ${r.status} ${t}`);
+    const error = new Error(`${command}: ${r.status} ${t}`);
+    error.status = r.status;
+    try { error.failureCode = JSON.parse(t).failureCode; } catch {}
+    throw error;
   }
   return r.json();
+}
+
+async function callBotService(method, body) {
+  let token = getToken();
+  const request = () => fetch(`${BACKEND}/aiserver.v1.GrokBotService/${method}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Connect-Protocol-Version": "1",
+      Authorization: `Bearer ${token}`,
+      "x-cursor-client-type": "sand",
+      "x-cursor-checksum": checksum(machineId()),
+      "x-request-id": randomUUID()
+    },
+    body: JSON.stringify(body)
+  });
+  let response = await request();
+  if (response.status === 401) {
+    const store = loadStore();
+    const name = getAccountNames(store).find(n => extractJwt(store[n].accessToken) === token);
+    if (name && store[name].refreshToken) {
+      const fresh = await refreshAuthToken(store[name].refreshToken);
+      store[name].accessToken = fresh.accessToken;
+      store[name].refreshToken = fresh.refreshToken;
+      saveStore(store);
+      token = extractJwt(fresh.accessToken);
+      response = await request();
+    }
+  }
+  if (!response.ok) throw new Error(`${method}: ${response.status}`);
+  return response.json();
+}
+
+async function sendServerPrompt(payload) {
+  const result = await callBotService("SendGrokBotUserMessage", {
+    agentId: payload.agentId, messageId: payload.clientNonce,
+    text: payload.prompt, sentAtMs: String(Date.now())
+  });
+  const delivery = typeof result.delivery === "string"
+    ? result.delivery.replace(/^GROK_BOT_USER_MESSAGE_DELIVERY_/, "") : result.delivery;
+  if (["ACCEPTED_BOX", "ACCEPTED_TEMPORAL", "DUPLICATE", 1, 2, 3].includes(delivery)) {
+    return { accepted: true };
+  }
+  throw new Error(result.refusal?.failureCode || `Server did not confirm message acceptance (delivery=${result.delivery}, fields=${Object.keys(result).join(",")})`);
 }
 
 // ── SQLite database reader (read-only) ───────────────────────────────────
@@ -618,7 +665,7 @@ const TOOLS = [
   },
   {
     name: "send_message",
-    description: "Send a message or user prompt to a Grok Bot agent and receive its response.",
+    description: "Send a message to a Grok Bot agent and return its acceptance result. Use get_transcript to read the bot's reply.",
     inputSchema: {
       type: "object",
       properties: {
@@ -686,10 +733,15 @@ const TOOLS = [
 async function handleTool(name, args) {
   switch (name) {
     case "list_bots": {
-      const result = await callGateway("listAgents");
+      let result;
+      try { result = await callGateway("listAgents"); }
+      catch (error) {
+        if (error.status !== 417) throw error;
+        result = await callBotService("ListGrokBotAgents", {});
+      }
       const agents = Array.isArray(result) ? result : (result.agents || []);
       return { content: [{ type: "text", text: JSON.stringify(agents.map(a => ({
-        id: a.id, name: a.name, description: a.description || "",
+        id: a.agentId || a.id, name: a.name, description: a.description || "",
         ...(a.origin ? { origin: a.origin } : {})
       })), null, 2) }] };
     }
@@ -705,12 +757,29 @@ async function handleTool(name, args) {
     }
 
     case "send_message": {
-      const result = await callGateway("sendMessage", { id: args.agentId, message: args.message });
+      const payload = { agentId: args.agentId, prompt: args.message, clientNonce: randomUUID() };
+      let result;
+      try {
+        result = await callGateway("sendPrompt", payload);
+      } catch (error) {
+        if (error.status !== 417 && !(error.status === 409 && error.failureCode === "send/agent-unavailable")) throw error;
+        result = await sendServerPrompt(payload);
+      }
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
 
     case "get_transcript": {
-      const result = await callGateway("getTranscript", { id: args.agentId, limit: args.limit || 50 });
+      let result;
+      try { result = await callGateway("getAgentTranscriptTail", { id: args.agentId, limit: args.limit || 50 }); }
+      catch (error) {
+        if (error.status !== 417) throw error;
+        const page = await callBotService("ListGrokBotTranscriptEntries", { agentId: args.agentId, limit: args.limit || 50 });
+        result = { entries: (page.entries || []).map(entry => ({
+          ...(entry.body ? JSON.parse(Buffer.from(entry.body, "base64").toString("utf8"))
+            : { kind: entry.entryKind, id: entry.entryId, bodyOmitted: true }),
+          seq: Number(entry.seq)
+        })).sort((a, b) => a.seq - b.seq) };
+      }
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
 

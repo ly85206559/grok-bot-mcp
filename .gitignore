@@ -1,3 +1,9 @@
 node_modules/
 *.log
 .gbm/
+.env
+.env.*
+accounts.json
+sand-secrets.json
+/config.json
+*.tgz

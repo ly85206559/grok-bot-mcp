@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test"
   },
   "files": [
     "server.mjs"
@@ -32,6 +32,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kargatharaakash/grok-bot-mcp.git"
+    "url": "git+https://github.com/ly85206559/grok-bot-mcp.git"
   }
 }

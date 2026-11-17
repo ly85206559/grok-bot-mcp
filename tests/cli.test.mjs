@@ -15,7 +15,7 @@ const SERVER_PATH = join(process.cwd(), "server.mjs");
 function runCli(args = "", env = {}) {
   const raw = execSync(`node "${SERVER_PATH}" ${args}`, {
     encoding: "utf8",
-    env: { ...process.env, HOME: TEST_DIR, ...env }
+    env: { ...process.env, HOME: TEST_DIR, USERPROFILE: TEST_DIR, ...env }
   });
   return raw.replace(/\x1b\[[0-9;]*m/g, "");
 }
